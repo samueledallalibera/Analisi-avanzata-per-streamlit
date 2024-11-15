@@ -4,9 +4,6 @@ import pandas as pd
 import streamlit as st
 import io
 
-st.title("Test di Streamlit")
-st.write("Se questa pagina si carica correttamente, il problema non è Streamlit.")
-
 # Funzione gestione errori
 def gestisci_errore_parsing(filename, errore):
     st.write(f"Errore nel file {filename}: {errore}. Passo al file successivo.")
