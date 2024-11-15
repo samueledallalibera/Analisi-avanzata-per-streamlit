@@ -21,8 +21,14 @@ def parse_element(element, parsed_data, parent_tag=""):
         else:  # Altrimenti, aggiunge il testo alla struttura dei dati
             parsed_data[tag_name] = child.text
 
-# Funzione per estrarre e parsare il file XML
-def parse_xml_file(xml_file_path):
+# Funzione per estrarre e parsare il file XML con possibilità di includere o meno il dettaglio delle linee
+def parse_xml_file(xml_file_path, includi_dettaglio_linee=True):
+    """
+    Funzione che esegue il parsing di un file XML contenente una fattura elettronica.
+    :param xml_file_path: Percorso del file XML da parsare.
+    :param includi_dettaglio_linee: Se True, include anche i dettagli delle linee nella fattura.
+    :return: Una lista di dizionari con i dati estratti dalla fattura.
+    """
     tree = ET.parse(xml_file_path)
     root = tree.getroot()
 
@@ -42,26 +48,38 @@ def parse_xml_file(xml_file_path):
     for riepilogo in riepiloghi:
         parse_element(riepilogo, riepilogo_dati)
 
+    # Gestione delle linee della fattura
     line_items = []
     descrizioni = []
-    lines = root.findall(".//FatturaElettronicaBody//DettaglioLinee")
-    for line in lines:
-        line_data = {}
-        parse_element(line, line_data)
-        if "Descrizione" in line_data:
-            descrizioni.append(line_data["Descrizione"])
-        if line_data:
+    if includi_dettaglio_linee:
+        lines = root.findall(".//FatturaElettronicaBody//DettaglioLinee")
+        for line in lines:
+            line_data = {}
+            parse_element(line, line_data)
+            if "Descrizione" in line_data:
+                descrizioni.append(line_data["Descrizione"])
             line_items.append(line_data)
 
+    # Combinazione dei dati estratti
     all_data = []
     combined_data = {**header_data, **general_data, **riepilogo_dati}
 
-    if descrizioni:
-        combined_data["Descrizione"] = " | ".join(descrizioni)
-    all_data.append(combined_data)
+    # Se includiamo il dettaglio delle linee, lo aggiungiamo alla combinazione
+    if line_items:
+        first_line_data = line_items[0]
+        combined_data = {**combined_data, **first_line_data}
+        all_data.append(combined_data)
+        for line_data in line_items[1:]:
+            line_row = {**{key: None for key in combined_data.keys()}, **line_data}
+            all_data.append(line_row)
+    else:
+        # Se non includiamo il dettaglio delle linee ma abbiamo descrizioni, le aggiungiamo come concatenazione
+        if descrizioni:
+            combined_data["Descrizione"] = " | ".join(descrizioni)
+        all_data.append(combined_data)
 
     return all_data
-
+    
 # Funzione per estrarre i dati richiesti dal file XML
 def extract_required_data_from_xml(xml_file_path):
     tree = ET.parse(xml_file_path)
@@ -82,17 +100,49 @@ def extract_required_data_from_xml(xml_file_path):
 
     return extracted_data
 
+# Funzione per iterare su più file e compilare un unico DataFrame
+def process_all_files(xml_folder_path, includi_dettaglio_linee=True):
+    all_data_combined = []
+
+    for filename in os.listdir(xml_folder_path):
+        if filename.endswith('.xml'):
+            xml_file_path = os.path.join(xml_folder_path, filename)
+            print(f"Elaborando il file: {filename}")
+            try:
+                file_data = parse_xml_file(xml_file_path, includi_dettaglio_linee)
+                all_data_combined.extend(file_data)
+            except ET.ParseError as e:
+                gestisci_errore_parsing(filename, e)
+
+    all_data_df = pd.DataFrame(all_data_combined)
+    return all_data_df
+
 # Funzione per estrarre e processare i file .zip
 def estrai_zip(file):
-    # Crea una cartella temporanea per estrarre il contenuto
-    temp_dir = tempfile.mkdtemp()
+    # Crea una cartella visibile nella sessione corrente per estrarre il contenuto
+    output_dir = "estratti_zip"
+    
+    # Se la cartella esiste già, la svuotiamo
+    if os.path.exists(output_dir):
+        for filename in os.listdir(output_dir):
+            file_path = os.path.join(output_dir, filename)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+    
+    # Crea la cartella se non esiste
+    os.makedirs(output_dir, exist_ok=True)
 
     # Estrai il contenuto del file zip
     with zipfile.ZipFile(file, "r") as zip_ref:
-        zip_ref.extractall(temp_dir)
+        zip_ref.extractall(output_dir)
     
-    st.write(f"File ZIP estratto in: {temp_dir}")
-    return temp_dir
+    # Visualizza i file estratti
+    file_names = os.listdir(output_dir)
+    st.write(f"File ZIP estratto in: {output_dir}")
+    st.write(f"File estratti: {file_names}")
+    
+    # Restituisci il percorso della cartella di estrazione
+    return output_dir
 
 # Funzione per rinominare i file XML
 def rinomina_file(xml_folder_path, extracted_data_df):
