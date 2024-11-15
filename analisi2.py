@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 import io
 import tempfile
+import shutil
 
 # Funzione gestione errori
 def gestisci_errore_parsing(filename, errore):
@@ -21,7 +22,7 @@ def parse_element(element, parsed_data, parent_tag=""):
             parsed_data[tag_name] = child.text
 
 # Funzione per estrarre e parsare il file XML
-def parse_xml_file(xml_file_path, includi_dettaglio_linee=True):
+def parse_xml_file(xml_file_path):
     tree = ET.parse(xml_file_path)
     root = tree.getroot()
 
@@ -49,24 +50,15 @@ def parse_xml_file(xml_file_path, includi_dettaglio_linee=True):
         parse_element(line, line_data)
         if "Descrizione" in line_data:
             descrizioni.append(line_data["Descrizione"])
-        if includi_dettaglio_linee:
+        if line_data:
             line_items.append(line_data)
 
     all_data = []
     combined_data = {**header_data, **general_data, **riepilogo_dati}
 
-    if not includi_dettaglio_linee and descrizioni:
+    if descrizioni:
         combined_data["Descrizione"] = " | ".join(descrizioni)
-        all_data.append(combined_data)
-    elif line_items:
-        first_line_data = line_items[0]
-        combined_data = {**combined_data, **first_line_data}
-        all_data.append(combined_data)
-        for line_data in line_items[1:]:
-            line_row = {**{key: None for key in combined_data.keys()}, **line_data}
-            all_data.append(line_row)
-    else:
-        all_data.append(combined_data)
+    all_data.append(combined_data)
 
     return all_data
 
@@ -90,22 +82,6 @@ def extract_required_data_from_xml(xml_file_path):
 
     return extracted_data
 
-# Funzione per decodificare e convertire i file .p7m in .xml
-def converti_p7m_in_xml(fe_path):
-    if not os.path.exists(fe_path):
-        st.error("Il percorso specificato non esiste!")
-        return
-
-    file = os.listdir(fe_path)
-
-    for x in range(len(file)):
-        full_file_path = os.path.join(fe_path, file[x])
-        if ".p7m" in file[x]:
-            xml_output_path = os.path.join(fe_path, f"{x}.xml")
-            os.system(f'openssl smime -verify -noverify -in "{full_file_path}" -inform DER -out "{xml_output_path}"')
-            os.remove(full_file_path)  # Rimuovi il file .p7m originale
-            st.write(f"File {file[x]} convertito in XML.")
-
 # Funzione per estrarre e processare i file .zip
 def estrai_zip(file):
     # Crea una cartella temporanea per estrarre il contenuto
@@ -117,6 +93,22 @@ def estrai_zip(file):
     
     st.write(f"File ZIP estratto in: {temp_dir}")
     return temp_dir
+
+# Funzione per rinominare i file XML
+def rinomina_file(xml_folder_path, extracted_data_df):
+    renamed_folder = tempfile.mkdtemp()
+    for filename in os.listdir(xml_folder_path):
+        if filename.endswith('.xml'):
+            xml_file_path = os.path.join(xml_folder_path, filename)
+            # Estrai i dati del file XML
+            data = extract_required_data_from_xml(xml_file_path)
+            # Crea un nuovo nome per il file
+            new_filename = f"{data.get('Numero', 'sconosciuto')}_{data.get('Denominazione', 'senza_nome')}.xml"
+            new_file_path = os.path.join(renamed_folder, new_filename)
+            # Copia il file con il nuovo nome
+            shutil.copy(xml_file_path, new_file_path)
+            st.write(f"File {filename} rinominato in {new_filename}")
+    return renamed_folder
 
 # Funzione per processare tutti i file XML estratti
 def process_all_files_from_zip(zip_file):
@@ -137,24 +129,40 @@ def process_all_files_from_zip(zip_file):
                 gestisci_errore_parsing(filename, e)
 
     all_data_df = pd.DataFrame(all_data_combined)
-    return all_data_df
+    return all_data_df, extracted_folder
 
 # Caricamento del file ZIP
 uploaded_zip = st.file_uploader("Carica il file ZIP contenente i file XML", type=["zip"])
 
 if uploaded_zip:
     # Processa i file XML contenuti nel file ZIP
-    extracted_data_df = process_all_files_from_zip(uploaded_zip)
+    extracted_data_df, extracted_folder = process_all_files_from_zip(uploaded_zip)
+
+    # Rinominare i file XML estratti
+    renamed_folder = rinomina_file(extracted_folder, extracted_data_df)
 
     # Creazione del buffer per il file Excel
     output = io.BytesIO()
     extracted_data_df.to_excel(output, index=False)
     output.seek(0)
 
-    # Pulsante per il download
+    # Pulsante per il download dell'Excel
     st.download_button(
         label="Scarica il file Excel",
         data=output,
         file_name="fattura_dati_combinati_selezionati.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+    # Archiviazione dei file XML rinominati in un archivio ZIP
+    zip_filename = tempfile.mktemp(suffix='.zip')
+    shutil.make_archive(zip_filename.replace('.zip', ''), 'zip', renamed_folder)
+
+    # Pulsante per il download del file ZIP rinominato
+    with open(zip_filename, 'rb') as f:
+        st.download_button(
+            label="Scarica i file XML rinominati",
+            data=f,
+            file_name="fatture_rinominati.zip",
+            mime="application/zip"
+        )
