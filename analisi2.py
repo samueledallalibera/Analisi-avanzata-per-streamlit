@@ -2,10 +2,11 @@ import os
 import xml.etree.ElementTree as ET
 import pandas as pd
 import streamlit as st
+import io
 
 # Funzione gestione errori
 def gestisci_errore_parsing(filename, errore):
-    print(f"Errore nel file {filename}: {errore}. Passo al file successivo.")
+    st.write(f"Errore nel file {filename}: {errore}. Passo al file successivo.")
 
 # Funzione di esplorazione ricorsiva per il parsing dei dati
 def parse_element(element, parsed_data, parent_tag=""):
@@ -94,7 +95,7 @@ def process_all_files(xml_folder_path, includi_dettaglio_linee=True):
     for filename in os.listdir(xml_folder_path):
         if filename.endswith('.xml'):
             xml_file_path = os.path.join(xml_folder_path, filename)
-            print(f"Elaborando il file: {filename}")
+            st.write(f"Elaborando il file: {filename}")
             try:
                 file_data = parse_xml_file(xml_file_path, includi_dettaglio_linee)
                 all_data_combined.extend(file_data)
@@ -120,7 +121,7 @@ def aggiorna_file_excel(output_path, nuovi_dati_df):
         df_combinato = nuovi_dati_df
     
     df_combinato.to_excel(output_path, index=False)
-    print(f"Il file Excel è stato aggiornato o creato in '{output_path}'.")
+    st.write(f"Il file Excel è stato aggiornato o creato in '{output_path}'.")
 
 # Funzione per decodificare e convertire i file .p7m in .xml
 def converti_p7m_in_xml(fe_path):
@@ -132,7 +133,7 @@ def converti_p7m_in_xml(fe_path):
             xml_output_path = os.path.join(fe_path, f"{x}.xml")
             os.system(f'openssl smime -verify -noverify -in "{full_file_path}" -inform DER -out "{xml_output_path}"')
             os.remove(full_file_path)  # Rimuovi il file .p7m originale
-            print(f"File {file[x]} convertito in XML.")
+            st.write(f"File {file[x]} convertito in XML.")
 
 # Elenco delle colonne di default
 colonne_default = [
@@ -165,15 +166,15 @@ def rinomina_file(xml_folder_path, df):
             new_file_path = os.path.join(xml_folder_path, new_file_name)
             try:
                 os.rename(old_file_path, new_file_path)
-                print(f"Rinominato: {row['FileName']} -> {new_file_name}")
+                st.write(f"Rinominato: {row['FileName']} -> {new_file_name}")
             except OSError as e:
-                print(f"Errore nella rinomina di {row['FileName']}: {e}")
+                st.write(f"Errore nella rinomina di {row['FileName']}: {e}")
 
 # Input percorso cartella XML
-xml_folder_path = input("Inserisci il percorso della cartella contenente i file XML (converti prima se ci sono file .p7m): ")
+xml_folder_path = st.text_input("Inserisci il percorso della cartella contenente i file XML (converti prima se ci sono file .p7m): ")
 
 # Chiede se includere il dettaglio delle linee
-includi_dettaglio_linee = input("Vuoi includere il dettaglio delle linee? (sì/no): ").strip().lower() == 'sì'
+includi_dettaglio_linee = st.selectbox("Vuoi includere il dettaglio delle linee?", ['no', 'sì']) == 'sì'
 
 # Se ci sono file .p7m, li converte in XML
 converti_p7m_in_xml(xml_folder_path)
@@ -186,20 +187,18 @@ def process_all_xml_files(xml_folder_path):
     for filename in os.listdir(xml_folder_path):
         if filename.endswith('.xml'):
             xml_file_path = os.path.join(xml_folder_path, filename)
-            print(f"Elaborando il file: {filename}")
+            st.write(f"Elaborando il file: {filename}")
             try:
-                # Estrai i dati richiesti dal file XML
                 file_data = extract_required_data_from_xml(xml_file_path)
-                file_data["FileName"] = filename  # Salva il nome originale del file
+                file_data["FileName"] = filename
                 all_extracted_data.append(file_data)
                 file_names.append(filename)
             except ET.ParseError as e:
-                print(f"Errore nel parsing del file {filename}: {e}. Passo al file successivo.")
+                gestisci_errore_parsing(filename, e)
 
-    # Creazione di un DataFrame con i dati estratti
     return pd.DataFrame(all_extracted_data)
 
-# Estrazione dei dati e creazione del DataFrame
+# Elaborazione dei file XML
 extracted_data_df = process_all_xml_files(xml_folder_path)
 
 # Unione dei dati nella forma desiderata
@@ -208,25 +207,15 @@ unified_data_df = unisci_dati(extracted_data_df)
 # Rinominare i file XML
 rinomina_file(xml_folder_path, unified_data_df)
 
-# Input percorso di salvataggio
-output_folder_path = input("Inserisci il percorso della cartella dove salvare il file Excel (premi invio per usare la cartella corrente): ").strip()
-if not output_folder_path:
-    output_folder_path = os.getcwd()
-elif not os.path.exists(output_folder_path):
-    print("Percorso non valido. Verrà utilizzata la cartella corrente.")
-    output_folder_path = os.getcwd()
+# Creazione del buffer per il file Excel
+output = io.BytesIO()
+unified_data_df.to_excel(output, index=False)
+output.seek(0)
 
-output_file_name = "fattura_dati_combinati_selezionati.xlsx"
-output_path = os.path.join(output_folder_path, output_file_name)
-
-
-# Parsing e creazione del DataFrame
-all_data_df = process_all_files(xml_folder_path, includi_dettaglio_linee)
-
-# Filtrare le colonne esistenti
-colonne_esistenti = [col for col in colonne_default if col in all_data_df.columns]
-if colonne_esistenti:
-    dati_da_esportare_df = all_data_df[colonne_esistenti]
-    aggiorna_file_excel(output_path, dati_da_esportare_df)
-else:
-    print("Nessuna colonna valida trovata per l'esportazione.")
+# Pulsante per il download
+st.download_button(
+    label="Scarica il file Excel",
+    data=output,
+    file_name="fattura_dati_combinati_selezionati.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
