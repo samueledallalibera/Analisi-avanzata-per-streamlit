@@ -138,31 +138,39 @@ if uploaded_zip:
     # Processa i file XML contenuti nel file ZIP
     extracted_data_df, extracted_folder = process_all_files_from_zip(uploaded_zip)
 
-    # Rinominare i file XML estratti
-    renamed_folder = rinomina_file(extracted_folder, extracted_data_df)
+    # Verifica se i dati sono stati estratti correttamente
+    if extracted_data_df.empty:
+        st.error("Nessun dato trovato nei file XML. Verifica i file contenuti nel file ZIP.")
+    else:
+        st.write(f"DataFrame estratto con successo: {extracted_data_df.shape[0]} righe.")
 
-    # Creazione del buffer per il file Excel
-    output = io.BytesIO()
-    extracted_data_df.to_excel(output, index=False)
-    output.seek(0)
+        # Rinominare i file XML estratti
+        renamed_folder = rinomina_file(extracted_folder, extracted_data_df)
 
-    # Pulsante per il download dell'Excel
-    st.download_button(
-        label="Scarica il file Excel",
-        data=output,
-        file_name="fattura_dati_combinati_selezionati.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+        # Creazione del buffer per il file Excel
+        output = io.BytesIO()
+        extracted_data_df.to_excel(output, index=False)
+        output.seek(0)
 
-    # Archiviazione dei file XML rinominati in un archivio ZIP
-    zip_filename = tempfile.mktemp(suffix='.zip')
-    shutil.make_archive(zip_filename.replace('.zip', ''), 'zip', renamed_folder)
-
-    # Pulsante per il download del file ZIP rinominato
-    with open(zip_filename, 'rb') as f:
+        # Pulsante per il download dell'Excel
         st.download_button(
-            label="Scarica i file XML rinominati",
-            data=f,
-            file_name="fatture_rinominati.zip",
-            mime="application/zip"
+            label="Scarica il file Excel",
+            data=output,
+            file_name="fattura_dati_combinati_selezionati.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
+        # Archiviazione dei file XML rinominati in un archivio ZIP
+        zip_filename = tempfile.mktemp(suffix='.zip')
+        shutil.make_archive(zip_filename.replace('.zip', ''), 'zip', renamed_folder)
+
+        # Pulsante per il download del file ZIP rinominato
+        with open(zip_filename, 'rb') as f:
+            st.download_button(
+                label="Scarica i file XML rinominati",
+                data=f,
+                file_name="fatture_rinominati.zip",
+                mime="application/zip"
+            )
+
+
