@@ -1,8 +1,10 @@
 import os
+import zipfile
 import xml.etree.ElementTree as ET
 import pandas as pd
 import streamlit as st
 import io
+import tempfile
 
 # Funzione gestione errori
 def gestisci_errore_parsing(filename, errore):
@@ -88,23 +90,6 @@ def extract_required_data_from_xml(xml_file_path):
 
     return extracted_data
 
-# Funzione per iterare su più file e compilare un unico DataFrame
-def process_all_files(xml_folder_path, includi_dettaglio_linee=True):
-    all_data_combined = []
-
-    for filename in os.listdir(xml_folder_path):
-        if filename.endswith('.xml'):
-            xml_file_path = os.path.join(xml_folder_path, filename)
-            st.write(f"Elaborando il file: {filename}")
-            try:
-                file_data = parse_xml_file(xml_file_path, includi_dettaglio_linee)
-                all_data_combined.extend(file_data)
-            except ET.ParseError as e:
-                gestisci_errore_parsing(filename, e)
-
-    all_data_df = pd.DataFrame(all_data_combined)
-    return all_data_df
-
 # Funzione per decodificare e convertire i file .p7m in .xml
 def converti_p7m_in_xml(fe_path):
     if not os.path.exists(fe_path):
@@ -121,47 +106,49 @@ def converti_p7m_in_xml(fe_path):
             os.remove(full_file_path)  # Rimuovi il file .p7m originale
             st.write(f"File {file[x]} convertito in XML.")
 
-# Funzione per processare tutti i file XML nella cartella
-def process_all_xml_files(xml_folder_path):
-    all_extracted_data = []
-    file_names = []  # Per salvare i nomi dei file
+# Funzione per estrarre e processare i file .zip
+def estrai_zip(file):
+    # Crea una cartella temporanea per estrarre il contenuto
+    temp_dir = tempfile.mkdtemp()
 
-    for filename in os.listdir(xml_folder_path):
+    # Estrai il contenuto del file zip
+    with zipfile.ZipFile(file, "r") as zip_ref:
+        zip_ref.extractall(temp_dir)
+    
+    st.write(f"File ZIP estratto in: {temp_dir}")
+    return temp_dir
+
+# Funzione per processare tutti i file XML estratti
+def process_all_files_from_zip(zip_file):
+    # Estrai i file dal .zip
+    extracted_folder = estrai_zip(zip_file)
+    
+    all_data_combined = []
+
+    # Processa i file XML estratti
+    for filename in os.listdir(extracted_folder):
         if filename.endswith('.xml'):
-            xml_file_path = os.path.join(xml_folder_path, filename)
+            xml_file_path = os.path.join(extracted_folder, filename)
             st.write(f"Elaborando il file: {filename}")
             try:
-                file_data = extract_required_data_from_xml(xml_file_path)
-                file_data["FileName"] = filename
-                all_extracted_data.append(file_data)
-                file_names.append(filename)
+                file_data = parse_xml_file(xml_file_path)
+                all_data_combined.extend(file_data)
             except ET.ParseError as e:
                 gestisci_errore_parsing(filename, e)
 
-    return pd.DataFrame(all_extracted_data)
+    all_data_df = pd.DataFrame(all_data_combined)
+    return all_data_df
 
-# Elaborazione dei file XML solo quando il percorso è fornito
-xml_folder_path = st.text_input("Inserisci il percorso della cartella contenente i file XML (converti prima se ci sono file .p7m): ")
+# Caricamento del file ZIP
+uploaded_zip = st.file_uploader("Carica il file ZIP contenente i file XML", type=["zip"])
 
-if xml_folder_path:
-    # Chiede se includere il dettaglio delle linee
-    includi_dettaglio_linee = st.selectbox("Vuoi includere il dettaglio delle linee?", ['no', 'sì']) == 'sì'
-
-    # Se ci sono file .p7m, li converte in XML
-    converti_p7m_in_xml(xml_folder_path)
-
-    # Elaborazione dei file XML
-    extracted_data_df = process_all_xml_files(xml_folder_path)
-
-    # Unione dei dati nella forma desiderata
-    unified_data_df = unisci_dati(extracted_data_df)
-
-    # Rinominare i file XML
-    rinomina_file(xml_folder_path, unified_data_df)
+if uploaded_zip:
+    # Processa i file XML contenuti nel file ZIP
+    extracted_data_df = process_all_files_from_zip(uploaded_zip)
 
     # Creazione del buffer per il file Excel
     output = io.BytesIO()
-    unified_data_df.to_excel(output, index=False)
+    extracted_data_df.to_excel(output, index=False)
     output.seek(0)
 
     # Pulsante per il download
