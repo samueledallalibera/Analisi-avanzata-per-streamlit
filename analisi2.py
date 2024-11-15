@@ -105,26 +105,12 @@ def process_all_files(xml_folder_path, includi_dettaglio_linee=True):
     all_data_df = pd.DataFrame(all_data_combined)
     return all_data_df
 
-# Funzione per unire i dati nella forma "Denominazione FT Numero del Data"
-# Limita la denominazione a 20 caratteri
-def unisci_dati(df):
-    df['Dati_Uniti'] = df.apply(lambda row: f"{(row['Denominazione'][:20] if row['Denominazione'] and len(row['Denominazione']) > 20 else row['Denominazione'])} FT {row['Numero']} del {row['Data']}", axis=1)
-    return df[['Dati_Uniti', 'FileName']]
-
-# Funzione per aggiornare il file Excel senza duplicati
-def aggiorna_file_excel(output_path, nuovi_dati_df):
-    if os.path.exists(output_path):
-        dati_esistenti_df = pd.read_excel(output_path)
-        df_combinato = pd.concat([dati_esistenti_df, nuovi_dati_df], ignore_index=True)
-        df_combinato = df_combinato.drop_duplicates()
-    else:
-        df_combinato = nuovi_dati_df
-    
-    df_combinato.to_excel(output_path, index=False)
-    st.write(f"Il file Excel è stato aggiornato o creato in '{output_path}'.")
-
 # Funzione per decodificare e convertire i file .p7m in .xml
 def converti_p7m_in_xml(fe_path):
+    if not os.path.exists(fe_path):
+        st.error("Il percorso specificato non esiste!")
+        return
+
     file = os.listdir(fe_path)
 
     for x in range(len(file)):
@@ -134,50 +120,6 @@ def converti_p7m_in_xml(fe_path):
             os.system(f'openssl smime -verify -noverify -in "{full_file_path}" -inform DER -out "{xml_output_path}"')
             os.remove(full_file_path)  # Rimuovi il file .p7m originale
             st.write(f"File {file[x]} convertito in XML.")
-
-# Elenco delle colonne di default
-colonne_default = [
-    "CedentePrestatore/DatiAnagrafici/IdFiscaleIVA/IdPaese",
-    "CedentePrestatore/DatiAnagrafici/IdFiscaleIVA/IdCodice",
-    "CedentePrestatore/DatiAnagrafici/Anagrafica/Denominazione",
-    "CedentePrestatore/DatiAnagrafici/RegimeFiscale",
-    "CedentePrestatore/Sede/Indirizzo",
-    "CedentePrestatore/Sede/NumeroCivico",
-    "CedentePrestatore/Sede/CAP",
-    "CedentePrestatore/Sede/Comune",
-    "TipoDocumento",
-    "Data",
-    "Numero",
-    "ImportoTotaleDocumento",
-    "AliquotaIVA",
-    "ImponibileImporto",
-    "Imposta",
-    "Descrizione",
-    "PrezzoTotale"
-]
-
-# Funzione per rinominare i file con i dati uniti
-def rinomina_file(xml_folder_path, df):
-    for _, row in df.iterrows():
-        old_file_path = os.path.join(xml_folder_path, row['FileName'])
-        if row['Dati_Uniti']:  # Controlla che i dati uniti non siano vuoti
-            # Creazione del nuovo nome del file, rimuovendo caratteri non validi per i nomi file
-            new_file_name = "".join(c if c.isalnum() or c in " .-_()" else "_" for c in row['Dati_Uniti']) + ".xml"
-            new_file_path = os.path.join(xml_folder_path, new_file_name)
-            try:
-                os.rename(old_file_path, new_file_path)
-                st.write(f"Rinominato: {row['FileName']} -> {new_file_name}")
-            except OSError as e:
-                st.write(f"Errore nella rinomina di {row['FileName']}: {e}")
-
-# Input percorso cartella XML
-xml_folder_path = st.text_input("Inserisci il percorso della cartella contenente i file XML (converti prima se ci sono file .p7m): ")
-
-# Chiede se includere il dettaglio delle linee
-includi_dettaglio_linee = st.selectbox("Vuoi includere il dettaglio delle linee?", ['no', 'sì']) == 'sì'
-
-# Se ci sono file .p7m, li converte in XML
-converti_p7m_in_xml(xml_folder_path)
 
 # Funzione per processare tutti i file XML nella cartella
 def process_all_xml_files(xml_folder_path):
@@ -198,24 +140,34 @@ def process_all_xml_files(xml_folder_path):
 
     return pd.DataFrame(all_extracted_data)
 
-# Elaborazione dei file XML
-extracted_data_df = process_all_xml_files(xml_folder_path)
+# Elaborazione dei file XML solo quando il percorso è fornito
+xml_folder_path = st.text_input("Inserisci il percorso della cartella contenente i file XML (converti prima se ci sono file .p7m): ")
 
-# Unione dei dati nella forma desiderata
-unified_data_df = unisci_dati(extracted_data_df)
+if xml_folder_path:
+    # Chiede se includere il dettaglio delle linee
+    includi_dettaglio_linee = st.selectbox("Vuoi includere il dettaglio delle linee?", ['no', 'sì']) == 'sì'
 
-# Rinominare i file XML
-rinomina_file(xml_folder_path, unified_data_df)
+    # Se ci sono file .p7m, li converte in XML
+    converti_p7m_in_xml(xml_folder_path)
 
-# Creazione del buffer per il file Excel
-output = io.BytesIO()
-unified_data_df.to_excel(output, index=False)
-output.seek(0)
+    # Elaborazione dei file XML
+    extracted_data_df = process_all_xml_files(xml_folder_path)
 
-# Pulsante per il download
-st.download_button(
-    label="Scarica il file Excel",
-    data=output,
-    file_name="fattura_dati_combinati_selezionati.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
+    # Unione dei dati nella forma desiderata
+    unified_data_df = unisci_dati(extracted_data_df)
+
+    # Rinominare i file XML
+    rinomina_file(xml_folder_path, unified_data_df)
+
+    # Creazione del buffer per il file Excel
+    output = io.BytesIO()
+    unified_data_df.to_excel(output, index=False)
+    output.seek(0)
+
+    # Pulsante per il download
+    st.download_button(
+        label="Scarica il file Excel",
+        data=output,
+        file_name="fattura_dati_combinati_selezionati.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
