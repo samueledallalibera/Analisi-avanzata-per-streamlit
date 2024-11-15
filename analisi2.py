@@ -1,6 +1,7 @@
 import os
 import xml.etree.ElementTree as ET
 import pandas as pd
+import streamlit as st
 
 # Funzione gestione errori
 def gestisci_errore_parsing(filename, errore):
